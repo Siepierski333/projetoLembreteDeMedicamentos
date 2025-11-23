@@ -1,6 +1,7 @@
 # **Lembrete de Remédios**
 
-Este repositório implementa um sistema de **lembrete de medicamentos**, utilizando um ESP32, display OLED, potenciômetro, buzzer e LED. O horário do alarme é configurado através do potenciômetro, e a comunicação ocorre via protocolo MQTT, com sincronização de horário via NTP.
+Este repositório implementa um sistema de **lembrete de medicamentos**, utilizando um ESP32, display OLED, potenciômetro, buzzer, LED e **push button**.
+O horário do alarme é configurado através do potenciômetro, a confirmação do alerta é feita pelo botão, e a comunicação ocorre via protocolo MQTT, com sincronização de horário via NTP.
 
 ---
 
@@ -16,7 +17,8 @@ Este repositório implementa um sistema de **lembrete de medicamentos**, utiliza
 
 * **Placa:** ESP32 DevKit C v4 (simulado no Wokwi)
 * **Display:** OLED monocromático I2C
-* **Entrada:** Potenciômetro (configuração do horário)
+* **Entrada 1:** Potenciômetro (configuração do horário)
+* **Entrada 2:** **Push Button** (confirmação do alarme)
 * **Atuadores:** 1× LED de alerta, 1× buzzer piezoelétrico
 * **Comunicação:** Wi-Fi + MQTT via `test.mosquitto.org:1883` + NTP para sincronização de horário
 
@@ -25,34 +27,37 @@ Este repositório implementa um sistema de **lembrete de medicamentos**, utiliza
 ## ⚙️ Como Funciona
 
 1. **Configuração do Horário**
-   O potenciômetro permite ajustar o horário do alarme de 00:00 a 23:59.
+   O potenciômetro ajusta o horário do alarme de 00:00 a 23:59.
 
 2. **Sincronização de Horário**
-   O ESP32 se conecta a um servidor NTP para obter o horário atual (fuso GMT-3).
+   O ESP32 obtém o horário atual de um servidor NTP (GMT-3).
 
-3. **Monitoramento**
-   O sistema compara continuamente o horário atual com o horário configurado no potenciômetro.
+3. **Monitoramento do Horário**
+   O microcontrolador compara o horário atual com o horário selecionado.
 
-4. **Alerta**
+4. **Alerta de Medicamento**
 
-   * Quando o horário atual coincide com o horário configurado:
+   * Quando o horário coincide:
+
      * O **LED acende**
-     * O **buzzer emite som intermitente**
-     * O **display mostra mensagem de alerta**
+     * O **buzzer toca de forma intermitente**
+     * O **display mostra aviso**
+     * O sistema publica `"HORA DO MEDICAMENTO!!"` via MQTT
 
-5. **Exibição local**
-   O display OLED mostra em tempo real:
-   * Horário atual
-   * Próximo horário do medicamento
-   * Mensagem de alerta quando chegar a hora
+5. **Botão de Confirmação (Push Button)**
+   O alarme só para quando o usuário pressiona o botão:
+
+   * Buzzer desliga
+   * LED apaga
+   * Mensagem “Medicamento confirmado!” é exibida
+   * O alerta não é disparado novamente naquele minuto
 
 6. **MQTT**
 
-   * Publicação em tópicos:
-     * `medicamento/hora` (horário configurado no formato HH:MM)
-     * `medicamento/alerta` (mensagem "HORA DO MEDICAMENTO!!" quando dispara)
-   * Broker: `test.mosquitto.org` porta `1883` via TCP/IP
-   * Cliente MQTT: PubSubClient para ESP32
+   * Publicações:
+
+     * `medicamento/hora` → horário configurado
+     * `medicamento/alerta` → aviso de alarme
 
 ---
 
@@ -66,49 +71,75 @@ Este repositório implementa um sistema de **lembrete de medicamentos**, utiliza
 
 ---
 
+## 🖲️ Push Button no Projeto
+
+O botão é conectado ao **GPIO 14** usando **INPUT_PULLUP**, assim:
+
+```
+#define BUTTON_PIN 14
+pinMode(BUTTON_PIN, INPUT_PULLUP);
+```
+
+O acionamento confirma o alarme:
+
+```cpp
+if (digitalRead(BUTTON_PIN) == LOW && lembreteAtivo) {
+    noTone(BUZZER_PIN);
+    digitalWrite(LED_PIN, LOW);
+    lembreteAtivo = false;
+    alarmeConfirmado = true;
+
+    display.clearDisplay();
+    display.setCursor(0, 25);
+    display.println("Medicamento confirmado!");
+    display.display();
+    delay(1000); // debounce
+}
+```
+
+---
+
 ## 🚀 Simulação no Wokwi
 
-1. Acesse [https://wokwi.com](https://wokwi.com)
-2. Crie um novo projeto e faça upload de:
+1. Entre em [https://wokwi.com](https://wokwi.com)
+2. Crie um novo projeto
+3. Envie os arquivos:
 
    * `sketch.ino`
    * `diagram.json`
    * `libraries.txt`
-3. Clique em **Start Simulation**
-4. Abra o **Serial Monitor** e observe o **display OLED** na tela
-5. Ajuste o **potenciômetro** para configurar o horário do alarme
+4. Clique em **Start Simulation**
+5. Ajuste o **potenciômetro** e teste o **push button**
 
 ---
 
 ## Interfaces e Protocolos
 
-Este projeto utiliza comunicação via protocolo **MQTT** (Message Queuing Telemetry Transport) e sincronização de horário via **NTP** (Network Time Protocol), com os seguintes detalhes:
-
 * **Broker MQTT:** `test.mosquitto.org`
-* **Porta:** `1883`
+* **Porta:** 1883
+* **Cliente:** PubSubClient
 * **Transporte:** TCP/IP
-* **Client Library:** PubSubClient para ESP32
 * **Servidor NTP:** `pool.ntp.org` (GMT-3)
 
-### Publicações (ESP32 → Broker)
+### Publicações MQTT
 
-| Tópico                | Descrição                                         |
-| --------------------- | ------------------------------------------------- |
-| `medicamento/hora`    | Horário configurado para o medicamento (HH:MM)    |
-| `medicamento/alerta`  | Mensagem de alerta quando o horário é atingido    |
+| Tópico               | Descrição                        |
+| -------------------- | -------------------------------- |
+| `medicamento/hora`   | Horário configurado (HH:MM)      |
+| `medicamento/alerta` | Mensagem “HORA DO MEDICAMENTO!!” |
 
 ---
 
 ## 🔄 Possíveis Extensões
 
-* Configuração remota do horário via MQTT
-* Múltiplos horários de medicamentos programáveis
-* Histórico de alertas disparados
-* Botão de confirmação de tomada do medicamento
-* Integração com dashboard Node-RED para visualização
+* Múltiplos horários programados
+* Ajuste remoto via MQTT
+* Dashboard Node-RED
+* Registro histórico de tomadas
+* Push button para adiar (snooze)
 
 ---
 
 ## 📜 Licença
 
-Este projeto está licenciado sob a MIT License. Veja o arquivo `LICENSE` para mais detalhes.
+MIT License — consulte o arquivo `LICENSE`.
